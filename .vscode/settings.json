@@ -1,0 +1,13 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Run Package",
+            "type": "python",
+            "request": "launch",
+            "module": "Model_Code", // This tells VS Code to run it as a module
+            "cwd": "${workspaceFolder}", // Ensures the working directory is the root of the project
+            "console": "integratedTerminal"
+        }
+    ]
+}
