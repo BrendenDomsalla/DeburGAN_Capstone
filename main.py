@@ -1,11 +1,9 @@
-import cv2
 import gradio as gr
 import tensorflow as tf
 import numpy as np
 import os
 from util.Model_Functions import InstanceNormalization
 import traceback
-from Model_Code.GAN import GAN
 
 
 def load_model(save_path):
@@ -24,7 +22,6 @@ model = load_model(r'C:\Users\bdoms\DeburGAN_Capstone\Models\generator.keras')
 def deblur_image(image):
     try:
         image = (image.astype("float32")/127.5)-1
-        print(image.shape)
         image_size = 256
         overlap = 12
         dist = image_size-overlap
@@ -38,7 +35,7 @@ def deblur_image(image):
                 tile = image[y*dist:y*dist+image_size,
                              x*dist:x*dist+image_size]
                 tile = np.expand_dims(tile, axis=0)
-                tile = model(tf.convert_to_tensor(tile))[0]
+                tile = model(tile)[0]
                 tile = tile[overlap//2:-overlap//2, overlap//2:-overlap//2]
                 row.append(tile)
             processed_tiles.append(row)
@@ -48,7 +45,7 @@ def deblur_image(image):
         for i in range(height//dist):
             tile = image[i*dist:i*dist+image_size, -image_size:]
             tile = np.expand_dims(tile, axis=0)
-            tile = model(tf.convert_to_tensor(tile))[0]
+            tile = model(tile)[0]
             tile = tile[overlap//2:-overlap//2, -(image.shape[1]-width):]
             right_edges.append(tile)
         right_edges = np.array(right_edges)
@@ -58,23 +55,19 @@ def deblur_image(image):
         for i in range(width//dist):
             tile = image[-image_size:, i*dist:i*dist+image_size]
             tile = np.expand_dims(tile, axis=0)
-            tile = model(tf.convert_to_tensor(tile))[0]
+            tile = model(tile)[0]
             tile = tile[-(image.shape[0]-height):, overlap//2:-overlap//2]
             bottom_tiles.append(tile)
 
         bottom_right_tile = image[-image_size:, -image_size:]
-        print("Bottom right shape", np.array(bottom_right_tile).shape)
-        print(image_size)
         bottom_right_tile = np.expand_dims(bottom_right_tile, axis=0)
-        print("Bottom right shape", np.array(bottom_right_tile).shape)
-        bottom_right_tile = model(tf.convert_to_tensor(bottom_right_tile))[0]
+        bottom_right_tile = model(bottom_right_tile)[0]
         bottom_right_tile = bottom_right_tile[-(
             image.shape[0]-height):, -(image.shape[1]-width):]
 
         bottom_tiles = np.array(bottom_tiles)
         bottom_tiles = np.hstack(bottom_tiles)
         bottom_tiles = np.hstack([bottom_tiles, bottom_right_tile])
-        print(bottom_tiles.shape)
 
         processed_tiles = np.array(processed_tiles)
         # right_edges = np.expand_dims(right_edges, axis=0)

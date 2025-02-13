@@ -1,35 +1,49 @@
-import matplotlib.pyplot as plt
-import random
+import requests
+from bs4 import BeautifulSoup
 
-# Constants
-S = 50  # Side length of each square
-O = 10  # Overlap amount
+# Replace with your published URL
+url = "https://docs.google.com/document/d/e/2PACX-1vQGUck9HIFCyezsrBSnmENk5ieJuYwpt7YHYEzeNJkIb9OSDdx-ov2nRNReKQyey-cwJOoEKUhLmN9z/pub"
 
-# Compute step size
-d = S - O  # Distance between top-left corners of adjacent squares
 
-# Random grid size
-G_x = random.randint(5, 10)  # Random number of squares horizontally
-G_y = random.randint(5, 10)  # Random number of squares vertically
+class Image:
+    def __init__(self, width, height):
+        self.image = [[' ' for x in range(width)] for y in range(height)]
 
-# Create figure
-fig, ax = plt.subplots(figsize=(8, 8))
-ax.set_xlim(0, G_x * d + O)
-ax.set_ylim(0, G_y * d + O)
-ax.set_aspect('equal')
+    def insert_pixel(self, pixel):
+        x, ch, y = pixel
+        self.image[int(y)][int(x)] = ch
 
-# Draw squares
-for i in range(G_x):
-    for j in range(G_y):
-        x = i * d
-        y = j * d
-        square = plt.Rectangle(
-            (x, y), S, S, edgecolor='black', facecolor='lightblue', alpha=0.6)
-        ax.add_patch(square)
+    def show(self):
+        for i in self.image:
+            print(*i, sep='')
 
-# Hide axes
-ax.set_xticks([])
-ax.set_yticks([])
-ax.invert_yaxis()  # Invert to match normal (0,0) top-left coordinate system
+    @staticmethod
+    def load_image(url):
+        response = requests.get(url)
+        soup = BeautifulSoup(response.text, "html.parser")
+        content = soup.find('table')
+        rows = content.find_all('tr')[1:]
+        width, height = Image.get_image_dimensions(rows)
+        image = Image(width, height)
+        for row in rows:
+            cols = row.find_all('td')
+            cols = [col.text.strip() for col in cols]
+            image.insert_pixel(cols)
+        return image
 
-plt.show()
+    @staticmethod
+    def get_image_dimensions(rows):
+        width = 0
+        height = 0
+        for row in rows:
+            cols = row.find_all('td')
+            cols = [col.text.strip() for col in cols]
+            if int(cols[0])+1 > width:
+                width = int(cols[0])+1
+            if int(cols[2])+1 > height:
+                height = int(cols[2])+1
+        return (width, height)
+
+
+image = Image.load_image(url)
+image.show()
