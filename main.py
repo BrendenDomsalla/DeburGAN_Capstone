@@ -1,21 +1,19 @@
+import cv2
 import gradio as gr
 import tensorflow as tf
 import numpy as np
 import os
 from util.Model_Functions import InstanceNormalization
+import traceback
+from Model_Code.GAN import GAN
 
 
 def load_model(save_path):
-    """
-    Loads a TensorFlow model from the specified path.
-    :param save_path: Path to load the model from.
-    :return: Loaded model.
-    """
     if not os.path.exists(save_path):
         raise FileNotFoundError(
             f"The specified path {save_path} does not exist.")
     model = tf.keras.models.load_model(save_path, custom_objects={
-                                       "InstanceNormalization": InstanceNormalization})
+        "InstanceNormalization": InstanceNormalization})
     print(f"Model loaded from {save_path}")
     return model
 
@@ -23,76 +21,85 @@ def load_model(save_path):
 model = load_model(r'C:\Users\bdoms\DeburGAN_Capstone\Models\generator.keras')
 
 
-def deblur_image(input_image):
+def deblur_image(image):
     try:
-        # Ensure input is a valid NumPy array
-        if not isinstance(input_image, np.ndarray):
-            raise ValueError("Input is not a valid NumPy array")
+        image = (image.astype("float32")/127.5)-1
+        print(image.shape)
+        image_size = 256
+        overlap = 12
+        dist = image_size-overlap
+        height = (len(image)//dist)*dist
+        width = (len(image[0])//dist)*dist
 
-        # Convert input image to tf.float32
-        input_image = tf.convert_to_tensor(input_image, dtype=tf.float32)
-
-        # Ensure input image has 3 channels
-        if input_image.shape[-1] != 3:
-            raise ValueError("Input image must have 3 color channels")
-
-        # Normalize to [-1, 1] (as per model training)
-        input_image = (input_image / 127.5) - 1
-
-        # Determine dimensions for tiling
-        height, width, _ = input_image.shape
-        tile_size = 256
-
-        # Calculate the maximum dimensions divisible by tile_size
-        crop_height = (height // tile_size) * tile_size
-        crop_width = (width // tile_size) * tile_size
-
-        # Center-crop the image to the largest dimensions divisible by tile_size
-        offset_height = (height - crop_height) // 2
-        offset_width = (width - crop_width) // 2
-        cropped_image = tf.image.crop_to_bounding_box(
-            input_image, offset_height, offset_width, crop_height, crop_width
-        )
-
-        # Split the cropped image into tiles of size 256x256
-        tiles = []
-        for i in range(0, crop_height, tile_size):
-            for j in range(0, crop_width, tile_size):
-                tile = cropped_image[i:i+tile_size, j:j+tile_size, :]
-                tiles.append(tile)
-
-        # Process each tile with the model
         processed_tiles = []
-        for tile in tiles:
-            tile = tile[None, ...]  # Add batch dimension
-            # Assuming model returns a batch of images
-            output_tile = model(tile)[0]
-            processed_tiles.append(output_tile)
+        for y in range(height//dist):
+            row = []
+            for x in range(width//dist):
+                tile = image[y*dist:y*dist+image_size,
+                             x*dist:x*dist+image_size]
+                tile = np.expand_dims(tile, axis=0)
+                tile = model(tf.convert_to_tensor(tile))[0]
+                tile = tile[overlap//2:-overlap//2, overlap//2:-overlap//2]
+                row.append(tile)
+            processed_tiles.append(row)
 
-        # Stitch the processed tiles back together
-        rows = crop_height // tile_size
-        cols = crop_width // tile_size
-        stitched_image = tf.concat([
-            tf.concat(processed_tiles[row * cols:(row + 1) * cols], axis=1)
-            for row in range(rows)
-        ], axis=0)
+        # Create the right edge tiles
+        right_edges = []
+        for i in range(height//dist):
+            tile = image[i*dist:i*dist+image_size, -image_size:]
+            tile = np.expand_dims(tile, axis=0)
+            tile = model(tf.convert_to_tensor(tile))[0]
+            tile = tile[overlap//2:-overlap//2, -(image.shape[1]-width):]
+            right_edges.append(tile)
+        right_edges = np.array(right_edges)
 
-        # Denormalize the output back to [0, 1] for Gradio compatibility
-        stitched_image = ((stitched_image + 1) / 2.0).numpy()
+        # Bottom Tiles
+        bottom_tiles = []
+        for i in range(width//dist):
+            tile = image[-image_size:, i*dist:i*dist+image_size]
+            tile = np.expand_dims(tile, axis=0)
+            tile = model(tf.convert_to_tensor(tile))[0]
+            tile = tile[-(image.shape[0]-height):, overlap//2:-overlap//2]
+            bottom_tiles.append(tile)
 
-        # Clip values to ensure they are in the range [0, 1]
-        stitched_image = np.clip(stitched_image, 0.0, 1.0)
+        bottom_right_tile = image[-image_size:, -image_size:]
+        print("Bottom right shape", np.array(bottom_right_tile).shape)
+        print(image_size)
+        bottom_right_tile = np.expand_dims(bottom_right_tile, axis=0)
+        print("Bottom right shape", np.array(bottom_right_tile).shape)
+        bottom_right_tile = model(tf.convert_to_tensor(bottom_right_tile))[0]
+        bottom_right_tile = bottom_right_tile[-(
+            image.shape[0]-height):, -(image.shape[1]-width):]
 
-        return stitched_image, "No Errors Detected"
+        bottom_tiles = np.array(bottom_tiles)
+        bottom_tiles = np.hstack(bottom_tiles)
+        bottom_tiles = np.hstack([bottom_tiles, bottom_right_tile])
+        print(bottom_tiles.shape)
 
+        processed_tiles = np.array(processed_tiles)
+        # right_edges = np.expand_dims(right_edges, axis=0)
+        right_edges = np.vstack(right_edges)
+        output_image = [np.hstack(row) for row in processed_tiles]
+        output_image = np.vstack(output_image)
+        output_image = np.hstack(
+            [output_image, right_edges])
+        output_image = np.vstack([output_image, bottom_tiles])
+
+        output_image = np.clip((output_image+1)/2, 0, 1)
+
+        return output_image, "No Errors"
     except Exception as e:
-        error_msg = f"Error during image processing: {e}"
-        print(error_msg)
-        # Return a blank image and error message
-        return np.zeros((256, 256, 3), dtype="float32"), error_msg
+        errorMsg = f"Something went wrong. {e}\n{traceback.format_exc()}"
+        # raise Exception(errorMsg)
+        return np.zeros((100, 100, 3)), errorMsg
 
 
-# Gradio interface
+# image = cv2.imread(
+#     r"C:\Users\bdoms\DeburGAN_Capstone\Datasets\Train\blurred\012\00000000.png")
+# im = deblur_image(image)
+# cv2.imshow("image", im[0])
+# cv2.waitKey(0)
+# cv2.destroyAllWindows()
 interface = gr.Interface(
     fn=deblur_image,
     inputs=gr.Image(type="numpy"),
@@ -102,5 +109,4 @@ interface = gr.Interface(
     description="Upload a blurry image, and this AI will try to deblur it."
 )
 
-# Launch the interface
 interface.launch(debug=True)
